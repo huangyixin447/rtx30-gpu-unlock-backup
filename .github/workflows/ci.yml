@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The pinned NVIDIA/CachyOS inputs (about 340 MB) are fetched once per
+# manifest change into .inputs and shared by every job through the cache.
+jobs:
+  inputs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: .inputs
+          key: inputs-${{ hashFiles('firmware/artifacts-*.json') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: make inputs INPUTS=.inputs
+      - name: Verify the inputs
+        run: python3 firmware/fetch_artifacts.py --offline .inputs
+
+  # With the generated firmware the tests also run the whole unlock against
+  # mocked hardware, not only the components.
+  test:
+    needs: inputs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update -q && sudo apt-get install -qy zstd
+      - uses: actions/cache/restore@v4
+        with:
+          path: .inputs
+          key: inputs-${{ hashFiles('firmware/artifacts-*.json') }}
+          fail-on-cache-miss: true
+      - run: make firmware INPUTS=.inputs ASSETS="$RUNNER_TEMP/assets"
+      - run: make test ASSETS="$RUNNER_TEMP/assets"
+
+  module:
+    name: module (${{ matrix.image }})
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:12   # 6.1
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git
+          - image: ubuntu:24.04  # 6.8
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git
+          - image: debian:13   # 6.12
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git
+          - image: fedora:latest
+            setup: dnf install -qy git
+          - image: archlinux:latest
+            setup: pacman -Syu --noconfirm --needed git
+    steps:
+      # Without git the checkout is a GitHub archive, which leaves out
+      # everything .gitattributes marks export-ignore, .github included.
+      - run: ${{ matrix.setup }}
+      - uses: actions/checkout@v5
+      - run: sh .github/ci/module.sh
+
+  package:
+    name: package (${{ matrix.image }})
+    needs: inputs
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:13
+            setup: apt-get update -q && apt-get install -qy --no-install-recommends ca-certificates git make xz-utils zstd
+          - image: fedora:latest
+            setup: dnf install -qy git make xz zstd rpm-build dnf-plugins-core
+          - image: archlinux:latest
+            setup: pacman -Syu --noconfirm --needed base-devel git zstd
+    steps:
+      # git before the checkout, as above and so make dist and makepkg can
+      # build HEAD; zstd before the cache restore, which needs it.
+      - run: ${{ matrix.setup }}
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v4
+        with:
+          path: .inputs
+          key: inputs-${{ hashFiles('firmware/artifacts-*.json') }}
+          fail-on-cache-miss: true
+      - run: INPUTS=.inputs sh .github/ci/package.sh

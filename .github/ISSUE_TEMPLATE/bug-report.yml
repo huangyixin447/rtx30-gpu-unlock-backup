@@ -1,0 +1,56 @@
+name: Bug report
+description: Something wrong with building, installing, packaging or boot ordering. For how a card behaved, use a compatibility report.
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution
+      placeholder: Ubuntu 24.04, Arch, Fedora 44 ...
+    validations:
+      required: true
+
+  - type: input
+    id: kernel
+    attributes:
+      label: Kernel
+      description: Output of `uname -r`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: initramfs
+    attributes:
+      label: Initramfs generator
+      options:
+        - mkinitcpio
+        - dracut
+        - initramfs-tools
+        - Other or not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: gpu-unlock version and install method
+      description: Commit from `git rev-parse --short HEAD` in your checkout, and how you installed it.
+      placeholder: 4189b17, make install-arch
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The failing command's output, and `journalctl -k -b | grep -i gpu_unlock` if the problem is at boot.
+      render: text
+    validations:
+      required: false
